@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Edgen Jump</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+        touch-action: none;
+        background: #808080;
+      }
+      canvas {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        border: none;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@latest/dist/index.min.js"></script>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      let canvasWidth = window.innerWidth * dpr;
+      let canvasHeight = window.innerHeight * dpr;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+
+      const characterWidth = 60 * dpr;
+      const characterHeight = 90 * dpr;
+      const groundHeight = 50 * dpr;
+      const obstacleWidth = 20 * dpr;
+      const obstacleHeight = 40 * dpr;
+      const minObstacleGap = canvasWidth * 0.75;
+
+      let characterX = 50 * dpr;
+      let characterY = canvasHeight - groundHeight - characterHeight;
+      let velocityY = 0;
+      let gravity = 0.8 * dpr;
+      let jumpPower = -20 * dpr;
+      let isJumping = false;
+      let obstacles = [];
+      let score = 0;
+      let gameSpeed = 20 * dpr;
+      let highScore = localStorage.getItem("highScore") ? parseInt(localStorage.getItem("highScore")) : 0;
+      let gameOver = false;
+      let lastTime = performance.now();
+
+      let leaves = [
+        { x: canvasWidth * 0.2, y: 50 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 0 },
+        { x: canvasWidth * 0.5, y: 80 * dpr, width: 40 * dpr, height: 40 * dpr, imageIndex: 1 },
+        { x: canvasWidth * 0.8, y: 60 * dpr, width: 35 * dpr, height: 35 * dpr, imageIndex: 0 },
+        { x: canvasWidth * 0.3, y: 100 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 1 },
+      ];
+
+      const characterImage = new Image();
+      const backgroundImage = new Image();
+
+      characterImage.src =
+        "assets/layeredge.png";
+      backgroundImage.src =
+        "assets/imagebg.png";
+
+      let assetsLoaded = false;
+
+      Promise.all([
+        new Promise((resolve) => (characterImage.onload = resolve)),
+        new Promise((resolve) => (backgroundImage.onload = resolve)),
+      ])
+        .then(() => {
+          assetsLoaded = true;
+          window.FarcadeSDK.singlePlayer.actions.ready();
+          requestAnimationFrame(gameLoop);
+        })
+        .catch(() => {
+          console.warn("Failed to load one or more images, using fallbacks.");
+          assetsLoaded = true;
+          window.FarcadeSDK.singlePlayer.actions.ready();
+          requestAnimationFrame(gameLoop);
+        });
+
+      characterImage.onerror =
+        backgroundImage.onerror =
+          () => {
+            console.warn("Image load error, using fallback.");
+          };
+
+      function resizeCanvas() {
+        canvasWidth = window.innerWidth * dpr;
+        canvasHeight = window.innerHeight * dpr;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        characterY = canvasHeight - groundHeight - characterHeight;
+        obstacles.forEach((obstacle) => (obstacle.y = canvasHeight - groundHeight - obstacleHeight));
+        leaves = [
+          { x: canvasWidth * 0.2, y: 50 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 0 },
+          { x: canvasWidth * 0.5, y: 80 * dpr, width: 40 * dpr, height: 40 * dpr, imageIndex: 1 },
+          { x: canvasWidth * 0.8, y: 60 * dpr, width: 35 * dpr, height: 35 * dpr, imageIndex: 0 },
+          { x: canvasWidth * 0.3, y: 100 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 1 },
+        ];
+      }
+
+      window.addEventListener("resize", resizeCanvas, { passive: true });
+      resizeCanvas();
+
+      function spawnObstacle() {
+        if (obstacles.length > 0 && obstacles[obstacles.length - 1].x > canvasWidth - minObstacleGap) return;
+        const color = Math.random() < 0.5 ? "#228B22" : "#FF0000";
+        obstacles.push({
+          x: canvasWidth,
+          y: canvasHeight - groundHeight - obstacleHeight,
+          width: obstacleWidth,
+          height: obstacleHeight,
+          color: color,
+        });
+      }
+
+      function jump() {
+        if (!isJumping && !gameOver) {
+          velocityY = jumpPower;
+          isJumping = true;
+          window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+        }
+      }
+
+      let isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      if (isTouchDevice) {
+        canvas.addEventListener(
+          "touchstart",
+          (e) => {
+            e.preventDefault();
+            jump();
+          },
+          { passive: false },
+        );
+      } else {
+        canvas.addEventListener("click", jump, { passive: true });
+        document.addEventListener(
+          "keydown",
+          (e) => {
+            if ((e.code === "Space" || e.code === "ArrowUp") && !gameOver) {
+              e.preventDefault();
+              jump();
+            }
+          },
+          { passive: false },
+        );
+      }
+
+      function update(deltaTime) {
+        if (gameOver || !assetsLoaded) return;
+
+        score += gameSpeed * deltaTime * 0.001;
+        gameSpeed = Math.min(20 * dpr + (score / 40) * dpr, 50 * dpr);
+
+        velocityY += gravity;
+        characterY += velocityY;
+
+        if (characterY > canvasHeight - groundHeight - characterHeight) {
+          characterY = canvasHeight - groundHeight - characterHeight;
+          velocityY = 0;
+          isJumping = false;
+        }
+
+        leaves.forEach((leaf) => {
+          leaf.x -= gameSpeed * 0.3 * deltaTime * 0.01;
+          if (leaf.x + leaf.width < 0) {
+            leaf.x = canvasWidth;
+          }
+        });
+
+        obstacles = obstacles.filter((obstacle) => obstacle.x + obstacle.width > 0);
+        for (let obstacle of obstacles) {
+          obstacle.x -= gameSpeed * deltaTime * 0.01;
+
+          if (
+            characterX < obstacle.x + obstacle.width &&
+            characterX + characterWidth > obstacle.x &&
+            characterY < obstacle.y + obstacle.height &&
+            characterY + characterHeight > obstacle.y
+          ) {
+            gameOver = true;
+            window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+            if (score > highScore) {
+              highScore = Math.floor(score);
+              localStorage.setItem("highScore", highScore);
+            }
+            window.FarcadeSDK.singlePlayer.actions.gameOver({ score: Math.floor(score) });
+            return;
+          }
+        }
+
+        if (Math.random() < 0.03 * deltaTime * 0.01) {
+          spawnObstacle();
+        }
+      }
+
+      function draw() {
+        if (backgroundImage.complete && backgroundImage.naturalHeight !== 0) {
+          ctx.drawImage(backgroundImage, 0, 0, canvasWidth, canvasHeight);
+        } else {
+          ctx.fillStyle = "#808080";
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        }
+
+        leaves.forEach((leaf) => {
+        });
+
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, canvasHeight - groundHeight, canvasWidth, groundHeight);
+
+        if (characterImage.complete && characterImage.naturalHeight !== 0) {
+          ctx.drawImage(characterImage, characterX, characterY, characterWidth, characterHeight);
+        } else {
+          ctx.fillStyle = isJumping ? "#FF4500" : "#FF8C69";
+          ctx.fillRect(characterX, characterY, characterWidth, characterHeight);
+        }
+
+        for (let obstacle of obstacles) {
+          ctx.fillStyle = obstacle.color;
+          ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+        }
+
+        ctx.fillStyle = "white";
+        ctx.font = `${20 * dpr}px Arial`;
+        ctx.textAlign = "left";
+        ctx.fillText(`Score: ${Math.floor(score)}`, 10 * dpr, 30 * dpr);
+      }
+
+      function gameLoop(timestamp) {
+        if (!assetsLoaded) return;
+
+        const deltaTime = Math.min(timestamp - lastTime, 100);
+        lastTime = timestamp;
+
+        update(deltaTime);
+        draw();
+
+        if (!gameOver) requestAnimationFrame(gameLoop);
+      }
+
+      window.FarcadeSDK.on("play_again", () => {
+        resetGame();
+        requestAnimationFrame(gameLoop);
+      });
+
+      window.FarcadeSDK.on("toggle_mute", (data) => {
+      });
+
+      function resetGame() {
+        characterY = canvasHeight - groundHeight - characterHeight;
+        velocityY = 0;
+        isJumping = false;
+        obstacles = [];
+        score = 0;
+        gameSpeed = 20 * dpr;
+        gameOver = false;
+        lastTime = performance.now();
+        leaves = [
+          { x: canvasWidth * 0.2, y: 50 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 0 },
+          { x: canvasWidth * 0.5, y: 80 * dpr, width: 40 * dpr, height: 40 * dpr, imageIndex: 1 },
+          { x: canvasWidth * 0.8, y: 60 * dpr, width: 35 * dpr, height: 35 * dpr, imageIndex: 0 },
+          { x: canvasWidth * 0.3, y: 100 * dpr, width: 30 * dpr, height: 30 * dpr, imageIndex: 1 },
+        ];
+      }
+    </script>
+  </body>
+</html>
